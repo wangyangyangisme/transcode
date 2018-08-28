@@ -1,0 +1,96 @@
+.TH tcpvmexportd 1 "8th August 2003" "tcpvmexportd(1)"
+.SH NAME
+tcpvmexportd \- transcode PVM3 export interface
+.SH SYNOPSIS
+.na
+.B tcpvmexportd
+.BI -s|-m
+[
+.BI options
+]
+.SH COPYRIGHT
+\fBtcpvmexportd\fP is Copyright (C) by Malanchini Marzio
+.SH DESCRIPTION
+.B tcpvmexportd
+This is the frontend for all the activity of export_pvm module: the program is spawned on all cluster hosts and wait to do the encode work.
+.SH OPTIONS
+.TP
+\fB-s\fP
+Start tcpvmexportd in slave mode (internal use of export_pvm) [default].
+.TP
+\fB Sub Options for slave mode\fP
+
+\fB-j\fP
+Start merger process [off].
+
+\fB-L\fP
+Create only the merge list [off].
+
+\fB-c name\fP
+Name of slave function req in slave mode [none].
+
+\fB-x parameters\fP
+Multiplex parameters [none].
+
+\fB-1 param\fP
+First parameter to pass to the slave function [null].
+
+\fB-2 param\fP
+Second parameter to pass to the slave function [null].
+
+\fB-3 param\fP
+Third parameter to pass to the slave function [null].
+
+\fB-t type\fP
+Elab video or audio frame (video|audio|system|multisystem) [video].
+
+\fB-f name\fP
+Out file name [/tmp/my_file_name]
+
+\fB-p number\fP
+Multipass (0,1,2,3) [0].
+
+\fB-M \fP
+Enable internal multipass [off].
+
+.TP
+\fB-m\fP
+Start tcpvmexportd in master mode [off].
+
+.TP
+\fB Sub Options for master mode\fP
+
+\fB-j\fP
+Start the batch merge mode [off].
+
+\fB-C\fP
+Check the config or merge file [off].
+
+\fB-f name\fP
+Input file name [/tmp/my_file_name]
+
+.TP
+.B -h
+Print help.
+.TP
+.B -v
+Print the version.
+.SH EXAMPLES
+.PP
+Command:
+.PP
+.B tcpvmexportd \-m -j -f mylistfile.lst
+.PP
+Run tcpvmexportd in batch merge mode.
+.PP
+.B tcpvmexportd \-m -C -f mylistfile.lst
+.PP
+Check the config or the merge file.
+.PP
+.SH AUTHORS
+.B tcpvmexportd
+was written by Marzio Malanchini
+.br
+<marzio_malanchini@vodafone.it>
+.SH SEE ALSO
+.BR transcode (1)

@@ -1,0 +1,76 @@
+Key:
+[+] feature added
+[!] bugfix of an existing feature
+[*] change/improvement (not bugfix) of an existing feature
+[-] feature dropped
+
+===========================================================================
+transcode-1.1.7
+---------------
+[*] Update the video stabilization plugins to version 0.80. Speed boost.
+===========================================================================
+
+===========================================================================
+transcode-1.1.6
+---------------
+[!] Fixed bugs: #16452, #16703, #16648, #16611, #16844
+[!] tcdemux: fixed crash when using the new -A mode.
+[*] x264: fix to work properly with libx264 >= 78; require libx264 >= 66.
+[*] Update the video stabilization plugins to version 0.79. Speed boost.
+[*] Better maximum size detection for avisplit.
+[*] EXPERIMENTAL ffmpeg encoder preset support.
+[*] FFMpeg 0.8.x compatibility.
+[*] video4linux: made the v1 and v2 modules independent. v1 is deprecated.
+[!] Backported various minor bugfixes from HEAD/default.
+===========================================================================
+
+===========================================================================
+transcode-1.1.5
+---------------
+[*] Add a special-crafted import module targeting webcams using libv4l.
+[!] Fixed the colorspace detection into import_v4l2.
+[*] tcdemux: drop the builtin limit of streams selectable for passthrough.
+[*] Fixed the x264 module to work with libx264 >= 76.
+[*] Update the video stabilization plugins to version 0.61.
+[*] Made libmpeg2 an optional dependency (libmpeg2convert is needed too).
+===========================================================================
+
+===========================================================================
+transcode-1.1.4
+---------------
+[!] Fixed the build system to comply with autoconf 2.64.
+[!] Fixed bugs: #16046
+===========================================================================
+
+===========================================================================
+transcode-1.1.3
+---------------
+[+] Support for CubicKeys4 and Sinc8 zoom algorithms.
+[*] Support for input selection/channel tuning into import_v4l2 
+    (backport from the 1.2.x branch)
+[!] Fixed spurious write warnings when using -y *,tcaud (regression from 1.0).
+[!] Fixed bugs: #15302, #15306, #15351, #15502, #15825, #15615
+===========================================================================
+
+===========================================================================
+transcode-1.1.2
+---------------
+[!] Make the -W option work again like 1.0.x branch.
+[!] Proper handling of the alpha data in filter_logoaway (avoid segfault).
+[!] Fixed bugs: #15007, #15441
+[*] Allow to build x264 experimental encoder with last libx264 snapshots.
+[*] Allow to build transcode without FFmpeg.
+[!] Removed outdated libav* information from the FAQ.
+===========================================================================
+
+===========================================================================
+transcode-1.1.1
+---------------
+[*] Switched to new, terse ChangeLog format.
+[-] The import_imlist module is deprecated. Use --multi_input -x im instead.
+[*] Allow the dectectclipping filter to use a log file.
+[*] Big YAIT update by Allan Snider.
+[*] Added `frame' option to filter_text.
+[!] Resolved tcmodinfo linking/loading problems.
+[!] Fixed bugs: #15181, #15239
+===========================================================================

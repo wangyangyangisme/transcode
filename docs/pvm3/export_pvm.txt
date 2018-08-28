@@ -1,0 +1,881 @@
+Export_pvm Documentation
+
+Last update 2003/09/22 Marzio Malanchini <marzio_malanchini@vodafone.it>
+
+---------------
+* Index
+---------------
+  - Overview
+  - Schema
+  - Usage
+  - Requirements
+  - Examples
+  - Performance
+  - Tips
+  - Change log
+  - To do
+  - Bugs
+
+
+
+---------------
+* Overview
+---------------
+
+The export_pvm module is based on PVM3 library (Parallel Virtual Machine http://www.epm.ornl.gov/pvm/pvm_home.html) and enable the output codec of transcode to process the request in a distributed processing environments constructed on heterogeneous machines and architectures.
+The idea is to split the codec work on different machine using a front end (tcpvmexportd) that load the request module (e.g. export_mpeg2enc.so): each new instances receive from export_pvm a subset of frame and create a portion of the final video file.  When all the slave process on host 1,2..n are running (see the schema below) the main task on host 0 (transcode) is waiting for a free task: at the end, when all the video frame are decoded, an others slave processes (merger on host x,y,z) merge all produced file.
+For instance only this export module are supported:
+
+Video:
+	null	(built in)
+	mpeg2enc
+	mpeg
+	divx5
+	ffmpeg
+	xvid
+
+
+Audio:
+	null	(built in)
+	mp2enc
+	mpeg
+	divx5
+	ffmpeg
+	xvid
+
+
+Support for multipass (standard and built in)
+
+---------------
+* Schema
+---------------
+
+
+  /---------\				/---------\
+  |          |				|  load    |
+  |transcode |--> from filter output-->	| export   |
+  | host 0   |				|  pvm     |
+  \---------/				\---------/
+					    |
+					    | spawn process
+                                           \ /
+					    |
+				____________|________________
+				|	    |		     |
+				|	    |		     |
+ load external module     /-----------\   /----------\     /----------\
+ /--------------\ 	  |   slave    | |   slave    |   |   slave    |
+ |export_xxx.so  |<______ |tcpvmexportd| |tcpvmexportd|   |tcpvmexportd|
+ \--------------/ 	  |  host 1    | |  host 2    |   |  host n    |
+  			  \-----------/   \----------/     \----------/
+     				\___________|_______________/
+                           	            |
+					   \ /
+                           	            |
+                     	     	     /--------------\
+                     		     |  share fs     |
+                     		     |     nfs       |
+spawned by export_pvm                |               |
+   /-----------\         	     \--------------/
+   |  mergers   |            	            |
+   |tcpvmexportd|___________________________/
+   |host x,y,z  |
+   \-----------/
+	|
+	|
+       \/
+/--------------\
+| output video  |
+|     file      |
+\--------------/
+
+---------------
+* Usage
+---------------
+
+export_pvm module gets its options from transcode command line with -F option
+
+Running
+transcode -y pvm -F list
+
+the module give all the options
+
+[export_pvm.so] v0.0.1 (2003-07-19) (video) * | (audio) *
+[export_pvm.so]  -F configfile,[[nproc]:[maxproc]:[nfrxtask]]
+[export_pvm.so]  nproc,maxproc,nfrxtask override the parameter present in the config file
+[export_pvm.so]  List of known and supported codecs:
+[export_pvm.so]       Supported Modules
+[export_pvm.so]     --------------------
+[export_pvm.so]     null        mp2enc
+[export_pvm.so]     mpeg2enc    divx5
+[export_pvm.so]     mpeg        ffmpeg
+[export_pvm.so]     xvid
+[export_pvm.so]     --------------------
+
+where
+
+configfile	configuration file (see below)
+nproc		number of process for a single host
+maxproc		max process in the cluster
+nfrxtask	number of frame that a single slave task elab. (this is the initial value)
+
+nproc,maxproc,nfrxtask override the parameter present in the config file.
+
+---------- sample of config file ---------------------------------------
+[PvmHostCapability]
+NumProcMaxForHost = 1
+MaxProcForCluster = 10
+NumElabFrameForTask = 100
+InternalMultipass=0
+(Host)
+Hostname = marzio
+NumProcMax = 2
+(Host)
+Hostname = elisa
+NumProcMax = 2
+(Host)
+Hostname = cinzia
+NumProcMax = 1
+(Host)
+Hostname = lorenzo
+NumProcMax = 2
+
+[VideoMerger]
+Hostname=cinzia
+BuildOnlyBatchMergeList=1
+
+[AudioMerger]
+Hostname=marzio
+BuildOnlyBatchMergeList=0
+
+[SystemMerger]
+Hostname=marzio
+BuildOnlyBatchMergeList=0
+MultiplexParams="-f 8"
+
+[ExportVideoModule]
+Codec=mpeg2enc
+Param1=d
+Param2=
+Param3=
+
+[ExportAudioModule]
+Codec=mp2enc
+Param1=d
+Param2=
+Param3=
+---------- end config file ---------------------------------------
+
+
+where
+
+Section [PvmHostCapability] define the cluster environment
+
+	NumProcMaxForHost	max number of process for each host in cluster (this parameter override NumProcMax in subsection (Host)). default 1
+
+	MaxProcForCluster	max number of process for the cluster: if NumProcMaxForHost * number of host in cluster is > of MaxProcForCluster then MaxProcForCluster is used (this parameter override MaxProcForCluster in subsection (Host)). default 10
+
+	NumElabFrameForTask	number of frame for each running slave task. default 100
+
+	InternalMultipass	if set to 1 internal multipass is used (multipass in one pass). default 0
+
+	Subsection (Host)
+		Hostname	the name of the host to use in cluster	(not yet implemented in v 0.0.1). default localhost
+		NumProcMax	max number of process 	(not yet implemented in v 0.0.1). default 1
+
+Section [AudioMerger] define parameter for the audio merger task
+
+	Hostname	the name of the host to use in cluster. default localhost
+
+	BuildOnlyBatchMergeList	create only the build list to merge and remove the temporary file and rebuild the final audio file later (using tcpvmexportd -j -m -f file.cfg). If [SystemMerger] exists then this value is set to 1 by the export_pvm module. default 1 (yes)
+
+Section [VideoMerger] define parameter for the video merger task
+
+	Hostname	the name of the host to use in cluster. default localhost
+
+	BuildOnlyBatchMergeList	create only the build list to merge and remove the temporary file and rebuild the final video file later (using tcpvmexportd -j -m -f file.cfg). If [SystemMerger] exists then this value is set to 1 by the export_pvm module. default 1 (yes)
+
+
+Section [SystemMerger] define parameter for the system merger task
+
+	Hostname	the name of the host to use in cluster. default localhost
+
+	BuildOnlyBatchMergeList	create only the build list to merge and remove the temporary file and rebuild the final system file later (using tcpvmexportd -j -m -f file.cfg). default 1 (yes)
+		Value:
+			0 create directly the system file
+			1 create only the merge file list
+			2 create the intermediate system files (with a progressive numeber)
+
+	MultiplexParams	the parameters to pass to multiplex program (mplex,tcmplex,avimerge): default none. (e.g. for mplex MultiplexParams="-f 8")
+
+Section [ExportVideoModule] define parameter for export codec
+
+	Codec		The name of the codec (e.g. mpeg2enc,null,mpeg)
+
+	Param1		1st codec parameter
+
+	Param2		2nd codec parameter
+
+	Param3		3th codec parameter
+
+Section [ExportAudioModule] define parameter for export codec
+
+	Codec		The name of the codec (e.g. mp2enc,null,mpeg)
+
+	Param1		1st codec parameter
+
+	Param2		2nd codec parameter
+
+	Param3		3th codec parameter
+
+
+Warning
+	the subsection (Host) isn't yet implemented in v 0.0.1
+
+
+If BuildOnlyBatchMergeList parameter is set to 1 then export_pvm create some files list like this:
+
+
+
+---------- audio list file ---------------------------------------
+[AddAudioList]
+Destination = /tmp/Becca-Giasson.mpa
+Codec = mp2enc
+/tmp/Becca-Giasson-omil002-6648-0.mpa
+[RemoveAudioList]
+/tmp/Becca-Giasson-omil002-6648-0.mpa
+---------- end list file ---------------------------------------
+
+---------- video list file ---------------------------------------
+[AddVideoList]
+Destination = /tmp/Becca-Giasson.m2v
+Codec = mpeg2enc
+/tmp/Becca-Giasson-omil002-6645-0.m2v
+[RemoveVideoList]
+/tmp/Becca-Giasson-omil002-6645-0.m2v
+---------- end list file ---------------------------------------
+
+---------- system list file ---------------------------------------
+[SystemList]
+Destination = /tmp/Becca-Giasson.mpeg
+Codec = mpeg2enc-mp2enc
+MultiplexParams = "-f 8"
+BuildOnlyIntermediateFile=0
+[AddAudioList]
+Destination = /tmp/Becca-Giasson.mpa
+Codec = mp2enc
+/tmp/Becca-Giasson-omil002-6648-0.mpa
+[RemoveAudioList]
+/tmp/Becca-Giasson-omil002-6648-0.mpa
+[AddVideoList]
+Destination = /tmp/Becca-Giasson.m2v
+Codec = mpeg2enc
+/tmp/Becca-Giasson-omil002-6645-0.m2v
+[RemoveVideoList]
+/tmp/Becca-Giasson-omil002-6645-0.m2v
+---------- end list file ---------------------------------------
+
+
+
+
+where
+
+Section [AddVideoList] and [AddAudioList] define the merge group list
+
+	Destination	The name of destination file
+
+	Codec		The name of the codec
+
+	file name.....
+
+Section [RemoveVideoList] and [RemoveAudioList] define the remove group list
+
+	file name.....
+
+Section [SystemList] define how to multiplex the produced file list
+
+	Destination	The name of destination file
+
+	Codec		The name of the codec (e.g. mpeg2enc-mp2enc,mpeg-mpeg)
+
+	MultiplexParams	The parameters to pass to multiplex program (e.g.  MultiplexParams = "-f 8")
+
+	BuildOnlyIntermediateFile	Build only intermediate files. default 0
+
+The command
+
+tcpvmexportd -j -m -f merge.lst
+
+make the batch merge .
+
+
+
+
+---------------
+* Requirements
+---------------
+
+export_pvm require pvm3 (3.4) library to be compiled.
+
+To enable the module run configure with these parameters:
+
+
+(for redhat 9)
+./configure --with-pvm3 --with-pvm3-include=/usr/share/pvm3/include --with-pvm3-lib=/usr/share/pvm3/lib/LINUXI386
+(for debian)
+./configure --with-pvm3
+
+
+---------------
+* Examples
+---------------
+
+This is a quick and dirty how to set up the pvm cluster with two machine (host A and B)
+
+PVM need to exchange information between hosts (using remote shell or ssh)
+
+1) put the entries below in .bashrc for user xyzt (host A and host B)
+
+(for redhat 9)
+export PVM_ROOT=/usr/share/pvm3			#PVM root
+export PVM_PATH=/home/mmalanc/local/bin		#where you install transcode binary
+export PVM_WD=/home/mmalanc/local/bin		#where you install transcode binary
+export PVM_RSH=/usr/bin/ssh			#use ssh instead rsh
+
+(for debian)
+export PVM_ROOT=/usr/lib/pvm3			#PVM root
+export PVM_PATH=/home/mmalanc/local/bin		#where you install transcode binary
+export PVM_WD=/home/mmalanc/local/bin		#where you install transcode binary
+export PVM_RSH=/usr/bin/ssh			#use ssh instead rsh
+
+2) on each host create a ssh key
+
+	ssh-keygen -t rsa
+
+3) copy the public key
+
+	eval `ssh-agent`
+	ssh-add			# your passphrase
+	scp -p $HOME/.ssh/id_rsa.pub  hostB:$HOME/.ssh/authorized_keys
+	scp -p hostB:$HOME/.ssh/id_rsa.pub  $HOME/.ssh/authorized_keys # now no password is required
+
+4) test if ssh is work (without password)
+
+from hostA	ssh hostB (no password is required)
+from hostB	eval `ssh-agent`
+          	ssh-add                 # your passphrase
+          	ssh hostA (no password is required)
+
+
+5) goto the host that have the input video files (e.g. hostA) and run as root and share volume
+
+	(for redhat 9)
+hostA
+	/etc/init.d/nfs start		#start NFS server
+	exportfs -i -o rw hostB:/my_multimedia_repository
+
+hostB
+	mkdir /my_multimedia_repository
+	mount -t nfs hostB:/my_multimedia_repository /my_multimedia_repository
+
+
+6) as normal user (xyzt) on hostA run
+
+	pvm
+	pvm> add hostA
+	add hostA
+	1 successful
+                	    HOST     DTID
+        	            hostA    80000
+	pvm> conf
+	conf
+	2 hosts, 1 data format
+			    HOST     DTID     ARCH   SPEED       DSIG
+			   hostA    40000 LINUXI386    1000 0x00408841
+			   hostB    80000 LINUXI386    1000 0x00408841
+	pvm> quit
+	quit
+
+	Console: exit handler called
+	pvmd still running.
+
+	Now the cluster has two hosts configured.
+
+7) create the config file
+
+---------- sample of config file (see doc dir) ---------------------------------------
+[PvmHostCapability]
+NumProcMaxForHost = 1		#best 1 for each cpu
+MaxProcForCluster = 10
+NumElabFrameForTask = 100
+
+[AudioMerger]
+Hostname=hostA
+BuildOnlyBatchMergeList=1
+
+[VideoMerger]
+Hostname=hostA
+BuildOnlyBatchMergeList=1
+
+[SystemMerger]
+Hostname=hostA
+BuildOnlyBatchMergeList=1
+MultiplexParams="-f 8"
+
+[ExportVideoModule]
+Codec=mpeg2enc
+Param1=d
+Param2=
+Param3=
+
+[ExportAudioModule]
+Codec=mp2enc
+Param1=
+Param2=
+Param3=
+---------- end config file ---------------------------------------
+
+
+8) run transcode
+
+transcode -i /video/BeccaGiasson/Becca-Giasson-001.avi -y pvm -F /tmp/pvm.cfg -o /dati/multimedia/VOB/Becca-Giasson --progress_off
+
+at the end the output will be something like this
+
+-rw-r--r--    1 mmalanc  mmalanc      1247 Aug 13  2003 Becca-Giasson-audio.lst
+-rw-rw-r--    1 mmalanc  mmalanc    211614 Aug 13 10:58 Becca-Giasson-hostA-19430-0.m2v
+-rw-rw-r--    1 mmalanc  mmalanc    199511 Aug 13 10:58 Becca-Giasson-hostA-19430-1.m2v
+-rw-rw-r--    1 mmalanc  mmalanc    230401 Aug 13 10:58 Becca-Giasson-hostA-19430-2.m2v
+-rw-rw-r--    1 mmalanc  mmalanc    204532 Aug 13 10:59 Becca-Giasson-hostA-19430-3.m2v
+-rw-rw-r--    1 mmalanc  mmalanc    207048 Aug 13  2003 Becca-Giasson-hostA-19430-4.m2v
+-rw-rw-r--    1 mmalanc  mmalanc    201741 Aug 13 10:59 Becca-Giasson-hostA-19430-5.m2v
+-rw-rw-r--    1 mmalanc  mmalanc    117328 Aug 13 10:59 Becca-Giasson-hostA-19430-6.m2v
+-rw-rw-r--    1 mmalanc  mmalanc     13057 Aug 13 10:58 Becca-Giasson-hostA-19434-0.mpa
+-rw-rw-r--    1 mmalanc  mmalanc     13057 Aug 13 10:58 Becca-Giasson-hostA-19434-1.mpa
+-rw-rw-r--    1 mmalanc  mmalanc     13057 Aug 13 10:58 Becca-Giasson-hostA-19434-2.mpa
+-rw-rw-r--    1 mmalanc  mmalanc     13057 Aug 13 10:59 Becca-Giasson-hostA-19434-3.mpa
+-rw-rw-r--    1 mmalanc  mmalanc     13057 Aug 13 10:59 Becca-Giasson-hostA-19434-4.mpa
+-rw-rw-r--    1 mmalanc  mmalanc      6913 Aug 13  2003 Becca-Giasson-hostA-19434-5.mpa
+-rw-rw-r--    1 mmalanc  mmalanc    211897 Aug 13  2003 Becca-Giasson-hostB-29892-0.m2v
+-rw-rw-r--    1 mmalanc  mmalanc    203843 Aug 13  2003 Becca-Giasson-hostB-29892-1.m2v
+-rw-rw-r--    1 mmalanc  mmalanc    208230 Aug 13  2003 Becca-Giasson-hostB-29892-2.m2v
+-rw-rw-r--    1 mmalanc  mmalanc         4 Aug 13  2003 Becca-Giasson-hostB-29892-3.m2v
+-rw-rw-r--    1 mmalanc  mmalanc     13057 Aug 13  2003 Becca-Giasson-hostB-29893-0.mpa
+-rw-rw-r--    1 mmalanc  mmalanc     13057 Aug 13  2003 Becca-Giasson-hostB-29893-1.mpa
+-rw-rw-r--    1 mmalanc  mmalanc     13057 Aug 13  2003 Becca-Giasson-hostB-29893-2.mpa
+-rw-rw-r--    1 mmalanc  mmalanc     13057 Aug 13  2003 Becca-Giasson-hostB-29893-3.mpa
+-rw-rw-r--    1 mmalanc  mmalanc         0 Aug 13  2003 Becca-Giasson-hostB-29893-4.mpa
+-rw-r--r--    1 mmalanc  mmalanc      1249 Aug 13 10:59 Becca-Giasson-video.lst
+
+with these listing files
+
+------------ start Becca-Giasson-video.lst-------------
+[AddVideoList]
+Destination = /dati/multimedia/VOB/Becca-Giasson.m2v
+Codec = mpeg2enc
+/dati/multimedia/VOB/Becca-Giasson-hostB-29892-0.m2v
+/dati/multimedia/VOB/Becca-Giasson-hostA-19430-0.m2v
+/dati/multimedia/VOB/Becca-Giasson-hostA-19430-1.m2v
+/dati/multimedia/VOB/Becca-Giasson-hostA-19430-2.m2v
+/dati/multimedia/VOB/Becca-Giasson-hostB-29892-1.m2v
+/dati/multimedia/VOB/Becca-Giasson-hostA-19430-3.m2v
+/dati/multimedia/VOB/Becca-Giasson-hostA-19430-4.m2v
+/dati/multimedia/VOB/Becca-Giasson-hostB-29892-2.m2v
+/dati/multimedia/VOB/Becca-Giasson-hostA-19430-5.m2v
+/dati/multimedia/VOB/Becca-Giasson-hostA-19430-6.m2v
+[RemoveVideoList]
+/dati/multimedia/VOB/Becca-Giasson-hostA-19430-0.m2v
+/dati/multimedia/VOB/Becca-Giasson-hostB-29892-0.m2v
+/dati/multimedia/VOB/Becca-Giasson-hostA-19430-1.m2v
+/dati/multimedia/VOB/Becca-Giasson-hostA-19430-2.m2v
+/dati/multimedia/VOB/Becca-Giasson-hostA-19430-3.m2v
+/dati/multimedia/VOB/Becca-Giasson-hostB-29892-1.m2v
+/dati/multimedia/VOB/Becca-Giasson-hostA-19430-4.m2v
+/dati/multimedia/VOB/Becca-Giasson-hostB-29892-2.m2v
+/dati/multimedia/VOB/Becca-Giasson-hostA-19430-5.m2v
+/dati/multimedia/VOB/Becca-Giasson-hostA-19430-6.m2v
+/dati/multimedia/VOB/Becca-Giasson-hostB-29892-3.m2v
+------------ end   Becca-Giasson-video.lst-------------
+
+
+------------ start Becca-Giasson-audio.lst-------------
+[AddAudioList]
+Destination = /dati/multimedia/VOB/Becca-Giasson.mpa
+Codec = mp2enc
+/dati/multimedia/VOB/Becca-Giasson-hostA-19434-0.mpa
+/dati/multimedia/VOB/Becca-Giasson-hostA-19434-1.mpa
+/dati/multimedia/VOB/Becca-Giasson-hostA-19434-2.mpa
+/dati/multimedia/VOB/Becca-Giasson-hostB-29893-0.mpa
+/dati/multimedia/VOB/Becca-Giasson-hostB-29893-1.mpa
+/dati/multimedia/VOB/Becca-Giasson-hostA-19434-3.mpa
+/dati/multimedia/VOB/Becca-Giasson-hostB-29893-2.mpa
+/dati/multimedia/VOB/Becca-Giasson-hostA-19434-4.mpa
+/dati/multimedia/VOB/Becca-Giasson-hostA-19434-5.mpa
+/dati/multimedia/VOB/Becca-Giasson-hostB-29893-3.mpa
+[RemoveAudioList]
+/dati/multimedia/VOB/Becca-Giasson-hostA-19434-0.mpa
+/dati/multimedia/VOB/Becca-Giasson-hostB-29893-0.mpa
+/dati/multimedia/VOB/Becca-Giasson-hostA-19434-1.mpa
+/dati/multimedia/VOB/Becca-Giasson-hostA-19434-2.mpa
+/dati/multimedia/VOB/Becca-Giasson-hostB-29893-1.mpa
+/dati/multimedia/VOB/Becca-Giasson-hostA-19434-3.mpa
+/dati/multimedia/VOB/Becca-Giasson-hostB-29893-2.mpa
+/dati/multimedia/VOB/Becca-Giasson-hostA-19434-4.mpa
+/dati/multimedia/VOB/Becca-Giasson-hostB-29893-3.mpa
+/dati/multimedia/VOB/Becca-Giasson-hostA-19434-5.mpa
+/dati/multimedia/VOB/Becca-Giasson-hostB-29893-4.mpa
+------------ end   Becca-Giasson-audio.lst-------------
+
+and
+
+------------ start Becca-Giasson-system.lst-------------
+[SystemList]
+Destination = /dati/multimedia/VOB/Becca-Giasson.mpeg
+Codec = mpeg2enc-mp2enc
+MultiplexParams = "-f 8"
+BuildOnlyIntermediateFile=0
+[AddVideoList]
+Destination = /dati/multimedia/VOB/Becca-Giasson.m2v
+Codec = mpeg2enc
+/dati/multimedia/VOB/Becca-Giasson-hostB-29892-0.m2v
+/dati/multimedia/VOB/Becca-Giasson-hostA-19430-0.m2v
+/dati/multimedia/VOB/Becca-Giasson-hostA-19430-1.m2v
+/dati/multimedia/VOB/Becca-Giasson-hostA-19430-2.m2v
+/dati/multimedia/VOB/Becca-Giasson-hostB-29892-1.m2v
+/dati/multimedia/VOB/Becca-Giasson-hostA-19430-3.m2v
+/dati/multimedia/VOB/Becca-Giasson-hostA-19430-4.m2v
+/dati/multimedia/VOB/Becca-Giasson-hostB-29892-2.m2v
+/dati/multimedia/VOB/Becca-Giasson-hostA-19430-5.m2v
+/dati/multimedia/VOB/Becca-Giasson-hostA-19430-6.m2v
+[RemoveVideoList]
+/dati/multimedia/VOB/Becca-Giasson-hostA-19430-0.m2v
+/dati/multimedia/VOB/Becca-Giasson-hostB-29892-0.m2v
+/dati/multimedia/VOB/Becca-Giasson-hostA-19430-1.m2v
+/dati/multimedia/VOB/Becca-Giasson-hostA-19430-2.m2v
+/dati/multimedia/VOB/Becca-Giasson-hostA-19430-3.m2v
+/dati/multimedia/VOB/Becca-Giasson-hostB-29892-1.m2v
+/dati/multimedia/VOB/Becca-Giasson-hostA-19430-4.m2v
+/dati/multimedia/VOB/Becca-Giasson-hostB-29892-2.m2v
+/dati/multimedia/VOB/Becca-Giasson-hostA-19430-5.m2v
+/dati/multimedia/VOB/Becca-Giasson-hostA-19430-6.m2v
+/dati/multimedia/VOB/Becca-Giasson-hostB-29892-3.m2v
+[AddAudioList]
+Destination = /dati/multimedia/VOB/Becca-Giasson.mpa
+Codec = mp2enc
+/dati/multimedia/VOB/Becca-Giasson-hostA-19434-0.mpa
+/dati/multimedia/VOB/Becca-Giasson-hostA-19434-1.mpa
+/dati/multimedia/VOB/Becca-Giasson-hostA-19434-2.mpa
+/dati/multimedia/VOB/Becca-Giasson-hostB-29893-0.mpa
+/dati/multimedia/VOB/Becca-Giasson-hostB-29893-1.mpa
+/dati/multimedia/VOB/Becca-Giasson-hostA-19434-3.mpa
+/dati/multimedia/VOB/Becca-Giasson-hostB-29893-2.mpa
+/dati/multimedia/VOB/Becca-Giasson-hostA-19434-4.mpa
+/dati/multimedia/VOB/Becca-Giasson-hostA-19434-5.mpa
+/dati/multimedia/VOB/Becca-Giasson-hostB-29893-3.mpa
+[RemoveAudioList]
+/dati/multimedia/VOB/Becca-Giasson-hostA-19434-0.mpa
+/dati/multimedia/VOB/Becca-Giasson-hostB-29893-0.mpa
+/dati/multimedia/VOB/Becca-Giasson-hostA-19434-1.mpa
+/dati/multimedia/VOB/Becca-Giasson-hostA-19434-2.mpa
+/dati/multimedia/VOB/Becca-Giasson-hostB-29893-1.mpa
+/dati/multimedia/VOB/Becca-Giasson-hostA-19434-3.mpa
+/dati/multimedia/VOB/Becca-Giasson-hostB-29893-2.mpa
+/dati/multimedia/VOB/Becca-Giasson-hostA-19434-4.mpa
+/dati/multimedia/VOB/Becca-Giasson-hostB-29893-3.mpa
+/dati/multimedia/VOB/Becca-Giasson-hostA-19434-5.mpa
+/dati/multimedia/VOB/Becca-Giasson-hostB-29893-4.mpa
+------------ end   Becca-Giasson-system.lst-------------
+
+
+9) run tcpvmexportd in batch merge mode
+
+	9.1) if you plan to use only audio or video component then you can only run
+
+	tcpvmexportd -m -j -f /dati/multimedia/VOB/Becca-Giasson-audio.lst
+
+[tcpvmexportd] merge into /dati/multimedia/VOB/Becca-Giasson.mpa and remove file /dati/multimedia/VOB/Becca-Giasson-hostA-19434-0.mpa
+[tcpvmexportd] merge into /dati/multimedia/VOB/Becca-Giasson.mpa and remove file /dati/multimedia/VOB/Becca-Giasson-hostA-19434-1.mpa
+[tcpvmexportd] merge into /dati/multimedia/VOB/Becca-Giasson.mpa and remove file /dati/multimedia/VOB/Becca-Giasson-hostA-19434-2.mpa
+[tcpvmexportd] merge into /dati/multimedia/VOB/Becca-Giasson.mpa and remove file /dati/multimedia/VOB/Becca-Giasson-hostB-29893-0.mpa
+[tcpvmexportd] merge into /dati/multimedia/VOB/Becca-Giasson.mpa and remove file /dati/multimedia/VOB/Becca-Giasson-hostB-29893-1.mpa
+[tcpvmexportd] merge into /dati/multimedia/VOB/Becca-Giasson.mpa and remove file /dati/multimedia/VOB/Becca-Giasson-hostA-19434-3.mpa
+[tcpvmexportd] merge into /dati/multimedia/VOB/Becca-Giasson.mpa and remove file /dati/multimedia/VOB/Becca-Giasson-hostB-29893-2.mpa
+[tcpvmexportd] merge into /dati/multimedia/VOB/Becca-Giasson.mpa and remove file /dati/multimedia/VOB/Becca-Giasson-hostA-19434-4.mpa
+[tcpvmexportd] merge into /dati/multimedia/VOB/Becca-Giasson.mpa and remove file /dati/multimedia/VOB/Becca-Giasson-hostA-19434-5.mpa
+[tcpvmexportd] merge into /dati/multimedia/VOB/Becca-Giasson.mpa and remove file /dati/multimedia/VOB/Becca-Giasson-hostB-29893-3.mpa
+[tcpvmexportd] remove file /dati/multimedia/VOB/Becca-Giasson-hostA-19434-0.mpa
+[tcpvmexportd] remove file /dati/multimedia/VOB/Becca-Giasson-hostB-29893-0.mpa
+[tcpvmexportd] remove file /dati/multimedia/VOB/Becca-Giasson-hostA-19434-1.mpa
+[tcpvmexportd] remove file /dati/multimedia/VOB/Becca-Giasson-hostA-19434-2.mpa
+[tcpvmexportd] remove file /dati/multimedia/VOB/Becca-Giasson-hostB-29893-1.mpa
+[tcpvmexportd] remove file /dati/multimedia/VOB/Becca-Giasson-hostA-19434-3.mpa
+[tcpvmexportd] remove file /dati/multimedia/VOB/Becca-Giasson-hostB-29893-2.mpa
+[tcpvmexportd] remove file /dati/multimedia/VOB/Becca-Giasson-hostA-19434-4.mpa
+[tcpvmexportd] remove file /dati/multimedia/VOB/Becca-Giasson-hostB-29893-3.mpa
+[tcpvmexportd] remove file /dati/multimedia/VOB/Becca-Giasson-hostA-19434-5.mpa
+[tcpvmexportd] remove file /dati/multimedia/VOB/Becca-Giasson-hostB-29893-4.mpa
+
+or
+
+	tcpvmexportd -m -j -f /dati/multimedia/VOB/Becca-Giasson-video.lst
+
+[tcpvmexportd] merge into /dati/multimedia/VOB/Becca-Giasson.m2v and remove file /dati/multimedia/VOB/Becca-Giasson-hostB-29892-0.m2v
+[tcpvmexportd] merge into /dati/multimedia/VOB/Becca-Giasson.m2v and remove file /dati/multimedia/VOB/Becca-Giasson-hostA-19430-0.m2v
+[tcpvmexportd] merge into /dati/multimedia/VOB/Becca-Giasson.m2v and remove file /dati/multimedia/VOB/Becca-Giasson-hostA-19430-1.m2v
+[tcpvmexportd] merge into /dati/multimedia/VOB/Becca-Giasson.m2v and remove file /dati/multimedia/VOB/Becca-Giasson-hostA-19430-2.m2v
+[tcpvmexportd] merge into /dati/multimedia/VOB/Becca-Giasson.m2v and remove file /dati/multimedia/VOB/Becca-Giasson-hostB-29892-1.m2v
+[tcpvmexportd] merge into /dati/multimedia/VOB/Becca-Giasson.m2v and remove file /dati/multimedia/VOB/Becca-Giasson-hostA-19430-3.m2v
+[tcpvmexportd] merge into /dati/multimedia/VOB/Becca-Giasson.m2v and remove file /dati/multimedia/VOB/Becca-Giasson-hostA-19430-4.m2v
+[tcpvmexportd] merge into /dati/multimedia/VOB/Becca-Giasson.m2v and remove file /dati/multimedia/VOB/Becca-Giasson-hostB-29892-2.m2v
+[tcpvmexportd] merge into /dati/multimedia/VOB/Becca-Giasson.m2v and remove file /dati/multimedia/VOB/Becca-Giasson-hostA-19430-5.m2v
+[tcpvmexportd] merge into /dati/multimedia/VOB/Becca-Giasson.m2v and remove file /dati/multimedia/VOB/Becca-Giasson-hostA-19430-6.m2v
+[tcpvmexportd] remove file /dati/multimedia/VOB/Becca-Giasson-hostA-19430-0.m2v
+[tcpvmexportd] remove file /dati/multimedia/VOB/Becca-Giasson-hostB-29892-0.m2v
+[tcpvmexportd] remove file /dati/multimedia/VOB/Becca-Giasson-hostA-19430-1.m2v
+[tcpvmexportd] remove file /dati/multimedia/VOB/Becca-Giasson-hostA-19430-2.m2v
+[tcpvmexportd] remove file /dati/multimedia/VOB/Becca-Giasson-hostA-19430-3.m2v
+[tcpvmexportd] remove file /dati/multimedia/VOB/Becca-Giasson-hostB-29892-1.m2v
+[tcpvmexportd] remove file /dati/multimedia/VOB/Becca-Giasson-hostA-19430-4.m2v
+[tcpvmexportd] remove file /dati/multimedia/VOB/Becca-Giasson-hostB-29892-2.m2v
+[tcpvmexportd] remove file /dati/multimedia/VOB/Becca-Giasson-hostA-19430-5.m2v
+[tcpvmexportd] remove file /dati/multimedia/VOB/Becca-Giasson-hostA-19430-6.m2v
+[tcpvmexportd] remove file /dati/multimedia/VOB/Becca-Giasson-hostB-29892-3.m2v
+
+
+and the output will be
+
+-rw-r--r--    1 mmalanc  mmalanc   1996145 Aug 13 11:08 Becca-Giasson.m2v
+-rw-r--r--    1 mmalanc  mmalanc    124426 Aug 13 11:07 Becca-Giasson.mpa
+
+
+	9.2) If you plan to join audio and video then run the command
+
+	tcpvmexportd -m -j -f /dati/multimedia/VOB/Becca-Giasson-system.lst
+
+(if you multiplex the two file produced with 9.1 (Becca-Giasson.m2v Becca-Giasson.mpa) you'll have a mpeg system file with A/V out of sync)
+
+(with BuildOnlyBatchMergeList=0 in the pvm.cfg file the step 8 produce the final file directly)
+
+---------------
+* Performance
+---------------
+
+Number of frame: 5632
+
+Switched LAN 100 Mb/s
+
+
+Version of transcode (normal encode):
+
+transcode v0.6.10 (C) 2001-2003 Thomas Oestreich
+[transcode] auto-probing source SanMartinodiCastrozza-04-07-2000.smil (ok)
+[transcode] V: import format    | Digital Video QuickTime (V=mov|A=mov)
+[transcode] V: import frame     | 720x576  1.25:1
+[transcode] V: de-interlace     | (mode=5) interpolate scanlines / blend frames
+[transcode] V: bits/pixel       | 0.174
+[transcode] V: decoding fps,frc | 25.000,3
+[transcode] A: import format    | 0x1     PCM          [32000,16,2]
+[transcode] A: export format    | 0x50    MPEG layer-2 [32000,16,2]  128 kbps
+[transcode] V: encoding fps,frc | 25.000,3
+[transcode] A: bytes per frame  | 5120 (5120.000000)
+[transcode] A: adjustment       | 0@1000
+[transcode] V: IA32 accel mode  | sse (sse mmxext mmx asm)
+[transcode] V: video buffer     | 10 @ 720x576
+[import_xml.so] v0.0.8 (2003-07-09) (video) * | (audio) *
+[export_mp2enc.so] v1.0.8 (2003-04-10) (audio) MPEG 1/2
+[export_mpeg2enc.so] v1.1.8 (2003-07-24) (video) MPEG 1/2
+
+
+
+Version of transcode (pvm encode):
+
+transcode v0.6.10 (C) 2001-2003 Thomas Oestreich
+[transcode] auto-probing source SanMartinodiCastrozza-04-07-2000.smil (ok)
+[transcode] V: import format    | Digital Video QuickTime (V=mov|A=mov)
+[transcode] V: import frame     | 720x576  1.25:1
+[transcode] V: de-interlace     | (mode=5) interpolate scanlines / blend frames
+[transcode] V: bits/pixel       | 0.174
+[transcode] V: decoding fps,frc | 25.000,3
+[transcode] A: import format    | 0x1     PCM          [32000,16,2]
+[transcode] A: export format    | 0x55    MPEG layer-3 [32000,16,2]  128 kbps
+[transcode] V: encoding fps,frc | 25.000,3
+[transcode] A: bytes per frame  | 5120 (5120.000000)
+[transcode] A: adjustment       | 0@1000
+[transcode] V: IA32 accel mode  | sse (sse mmxext mmx asm)
+[transcode] V: video buffer     | 10 @ 720x576
+[import_xml.so] v0.0.8 (2003-07-09) (video) * | (audio) *
+[export_pvm.so] v0.0.1 (2003-08-12) (video) * | (audio) *
+(export_pvm_slave.c) on host hostA pid 23866 recall [export_mpeg2enc.so] v1.1.8 (2003-07-24) (video) MPEG 1/2
+(export_pvm_slave.c) on host hostB pid 11036 recall [export_mpeg2enc.so] v1.1.8 (2003-07-24) (video) MPEG 1/2
+(export_pvm_slave.c) on host hostA pid 23868 recall [export_mp2enc.so] v1.0.8 (2003-04-10) (audio) MPEG 1/2
+(export_pvm_slave.c) on host hostB pid 11037 recall [export_mp2enc.so] v1.0.8 (2003-04-10) (audio) MPEG 1/2
+
+
+Scenario pvm 1
+	host A: pentium 3 866 MHz, 1GB RAM (decode+nfs server+merger+slave process)
+	host B: pentium 3  1GHz, 256MB RAM (slave process)
+
+	Cmd1: transcode -i SanMartinodiCastrozza-04-07-2000.smil -y pvm -F /dati/multimedia/VOB/pvm.cfg -o /dati/multimedia/VOB/SanMartinodiCastrozza-04-07-2000-pvm -I 5
+	Cmd2: transcode -i SanMartinodiCastrozza-04-07-2000.smil -y pvm -F /dati/multimedia/VOB/pvm2.cfg -o /dati/multimedia/VOB/SanMartinodiCastrozza-04-07-2000-pvm -I 5 -w 7500
+	Config file:
+-----------------------pvm.cfg----------------------------------
+[PvmHostCapability]
+NumProcMaxForHost = 1
+MaxProcForCluster = 10
+NumElabFrameForTask = 100
+(Host)
+Hostname = hostA
+NumProcMax = 2
+(Host)
+Hostname = hostB
+NumProcMax = 2
+
+[VideoMerger]
+Hostname=hostA
+BuildOnlyBatchMergeList=0
+
+[AudioMerger]
+Hostname=hostA
+BuildOnlyBatchMergeList=0
+
+[SystemMerger]
+Hostname=hostA
+BuildOnlyBatchMergeList=0
+MultiplexParams="-f 8"
+
+[ExportVideoModule]
+Codec=mpeg2enc
+Param1=8
+Param2=
+Param3=
+
+[ExportAudioModule]
+Codec=mp2enc
+Param1=
+Param2=
+Param3=
+-----------------------pvm.cfg----------------------------------
+
+Scenario pvm 2
+	host A: pentium 3 866 MHz, 1GB RAM (decode+nfs server+merger+slave process)
+	host B: pentium 3  1 GHz, 256MB RAM (slave process)
+	host C: pentium 3  497 MHz, 256MB RAM (slave process)
+
+	Cmd1: transcode -i SanMartinodiCastrozza-04-07-2000.smil -y pvm -F /dati/multimedia/VOB/pvm.cfg -o /dati/multimedia/VOB/SanMartinodiCastrozza-04-07-2000-pvm -I 5
+	Cmd2: transcode -i SanMartinodiCastrozza-04-07-2000.smil -y pvm -F /dati/multimedia/VOB/pvm2.cfg -o /dati/multimedia/VOB/SanMartinodiCastrozza-04-07-2000-pvm -I 5 -w 7500
+	Config file:
+-----------------------pvm1.cfg----------------------------------
+[PvmHostCapability]
+NumProcMaxForHost = 1
+MaxProcForCluster = 10
+NumElabFrameForTask = 100
+(Host)
+Hostname = hostA
+NumProcMax = 2
+(Host)
+Hostname = hostB
+NumProcMax = 2
+
+[VideoMerger]
+Hostname=hostA
+BuildOnlyBatchMergeList=0
+
+[AudioMerger]
+Hostname=hostA
+BuildOnlyBatchMergeList=0
+
+[SystemMerger]
+Hostname=hostA
+BuildOnlyBatchMergeList=0
+MultiplexParams="-f 8"
+
+[ExportVideoModule]
+Codec=mpeg2enc
+Param1=6
+Param2="-f 3 -F 3 -n p -q 2 -r 32 -4 1 -2 1"
+Param3=
+
+[ExportAudioModule]
+Codec=mp2enc
+Param1=
+Param2=
+Param3=
+-----------------------pvm1.cfg----------------------------------
+
+
+Scenario normal encode
+	host A: pentium 3 866 MHz, 1GB RAM (mpeg2enc,mp2enc)
+
+	Cmd1: transcode -i SanMartinodiCastrozza-04-07-2000.smil -y mpeg2enc,mp2enc -F 8 -o /dati/multimedia/VOB/SanMartinodiCastrozza-04-07-2000-mpeg2enc-mp2enc -I 5
+	Cmd2: transcode -i SanMartinodiCastrozza-04-07-2000.smil -y mpeg2enc,mp2enc -F 6,"-f 3 -F 3 -n p -q 2 -r 32 -4 1 -2 1" -o /dati/multimedia/VOB/SanMartinodiCastrozza-04-07-2000-mpeg2enc-mp2enc -I 5 -w 7500
+
+
+Results:
+Cmd1
+	Normal encode		: elapsed time 1646 sec (27min 26sec -> 3.4212 fps)
+	Pvm encode 2 hosts	: elapsed time 1410 sec (23min 30sec -> 3.9943 fps)
+	Pvm encode 3 hosts	: elapsed time 1204 sec (20min 04sec -> 4.6777 fps)
+Cmd2
+	Normal encode		: elapsed time 7951 sec (2hour 12min 31sec -> 0.7083 fps)
+	Pvm encode 2 hosts	: elapsed time 4856 sec (1hour 20min 56sec -> 1.1598 fps)
+	Pvm encode 3 hosts	: elapsed time 4173 sec (1hour  9min 33sec -> 1.3496 fps)
+
+
+---------------
+* Tips
+---------------
+
+1) If you have a single machine with a single CPU don't use the export_pvm (it produce the same file in about 1.2-1.3 time then normal export module)
+2) If you have machine with a single CPU set NumProcMaxForHost to 1 max 2 and set MaxProcForCluster to number of host * NumProcMaxForHost + 1
+3) Set 1-2 process for each CPU
+4) If the decode process never wait for a free task then you probably found the right configuration (add more slave host is useless: you need to speed up the decode process).
+5) If you plan to have a system file don't multiplex the merged audio and video, but run the built in system merge process (this remove an A/V sync problem).
+6) If you plan to create a DVD with dvdauthor then set BuildOnlyBatchMergeList=2 in the [SystemMerger] section and pass to dvdauthor the system files generated (force BuildOnlyIntermediateFile=1 in the [SystemList] section). (with dvdauthor alpha 338 use this command dvdauthor -o mydir -c 0:00,x:yz mympeg.mpeg-000000 -c c 0:00,x:yz mympeg.mpeg-000001 ........ where x:yz is the value set in NumElabFrameForTask (e.g. NumElabFrameForTask=99 and PAL x:yz=3:24))
+7) If you enable the multipass option (-R 1,2) the video and audio log will be created in the output directory (option -o and -m).
+8) If you plan to create an avi with multipass, you can use the internal multipass (it takes less time then standard multipass option (set InternalMultipass=1))
+9) If you specify InternalMultipass=1 in cfg file and -R (1,2,3) in cmd line, -R option will be used.
+
+
+---------------
+* Change log
+---------------
+
+2003-09-22 * acinclude.m4 aclocal.m4 docs/export_pvm.txt docs/man/tcpvmexportd.1 export/export_ffmpeg.c export/export_pvm.c export/Makefile.am pvm3/export_pvm_slave.c pvm3/export_pvm_slave.h pvm3/external_codec.c pvm3/external_codec.h pvm3/Makefile.am pvm3/pvm_functions.c pvm3/pvm_functions.h pvm3/pvm_parser.c pvm3/pvm_parser.h pvm3/pvm_version.h pvm3/tcpvmexportd.c pvm3/vob_pack_unpack.c pvm3/vob_pack_unpack.h src/Makefile.am src/tc_func_excl.h src/tc_functions.c src/tc_functions.h src/transcode.c src/transcode.h
+
+- added support for ffmpeg,divx4,divx5,af6,xvid,xvid2 encode module.
+- added multipass and internal multipass support.
+- enable pvm3 by default.
+- bugfix.
+
+2003-08-21 * docs/export_pvm.txt export/export_pvm.c pvm3/external_codec.c pvm3/tcpvmexportd.c
+
+- added support for mpeg encode.
+
+2003-08-20 * docs/export_pvm.txt docs/man/tcpvmexportd.1 docs/pvm.cfg export/export_pvm.c pvm3/export_pvm_slave.c pvm3/export_pvm_slave.h pvm3/pvm_parser.c pvm3/pvm_parser.h pvm3/pvm_version.h pvm3/tcpvmexportd.c
+
+- added BuildOnlyBatchMergeList=2 in [SystemMerger] section to build only the intermediate system files and BuildOnlyIntermediateFile in [SystemList] section (dvdauthor don't like a merged file).
+
+2003-08-12 * first release of export_pvm
+
+
+
+
+---------------
+* To do
+---------------
+
+- add a really support for A/V multithread option (-u) (for instance is set to 1).
+- create a resource manager
+- retrieve encoded frame without nfs
+- balancing weight based
+- extension to other codec
+- remove the nfs dependency
+- more....
+
+
+
+---------------
+* Bugs
+---------------
+
+- please send me an e-mail

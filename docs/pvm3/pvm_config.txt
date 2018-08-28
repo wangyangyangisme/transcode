@@ -1,0 +1,192 @@
+
+  Configuring PVM modules for transcode
+  =====================================
+
+  Revision 0.1 - 20070808                                  Francesco Romani
+                                                   fromani at gmail dot com
+
+                                    ~~~
+
+ Introduction
+ ============
+
+From years, transcode supports clustering via PVM infrastructure.
+Clustering is one of trancode's peculiar features, and starting with 1.1.0
+release, is being rethinked, redesigned and rewrote from groundup.
+First user-visible change is some small but important incompatibilities
+in configuration file syntax from 1.0.x to 1.1.x released.
+
+This document outlines those changes and explain how to port 1.0.x
+configuration file to 1.1.x release.
+
+See docs/pvm3/pvm_10x.cfg and docs/pvm3/pvm_11x.cfg for valid example
+configuration files.
+
+
+ Changes between 1.0.x and 1.1.x
+ ===============================
+
+
+1. Important changes
+
+In a nutshell:
+* Number of cluster nodes must be now provided explicitely
+* Each cluster node has it's own configuration section, and can be
+  disabled independentely
+* Listing section can now contain only list data, so some section
+  are been split.
+
+
+2. Node configuration
+
+Node configuration was significantly changed. Each node has now
+a separate section with the name `NodeX', where `X' is a progressive
+index with no special meaning. So, node configuration are NO LONGER
+subsections of `PvmHostCapability' section.
+`PvmHostCapability' section MUST now explicitely provide the expected
+number of nodes in cluster using the new
+
+Nodes = NUM
+
+option, where `NUM' is of course the number of nodes avalaible;
+A minimum of 1 (one) node must be present in the cluster, and
+a maximum of 8 (eight) nodes must be present.
+
+Each node configuration section has now an
+`Enabled' = BOOL {yes,no}
+section that permit to disable current node.
+
+An important thing to notice is that nodes MUST be configured in order.
+If you configure, say, three nodes in a cluster, those nodes MUST
+be configured in `Node1', `Node2' and `Node3' section, otherwise
+PVM configuration parser will complain. This is a techincal limitation
+of the configuration parser and it will go away as soon as is possible.
+
+If you want to temporary disable a node, just set `Enabled = no' for it.
+
+Example (Configuring nodes):
+
+1.0.x:  ...
+1.0.x:  
+1.0.x:  [PvmHostCapability]
+1.0.x:  NumProcMaxForHost = 1
+1.0.x:  MaxProcForCluster = 10
+1.0.x:  NumElabFrameForTask = 100
+1.0.x:  (Host)
+1.0.x:  Hostname = foo.buz.lan
+1.0.x:  NumProcMax = 2
+1.0.x:  (Host)
+1.0.x:  Hostname = bar.buz.lan
+1.0.x:  NumProcMax = 2
+1.0.x:  
+1.0.x:  ...
+
+1.1.x:  ...
+1.1.x:  
+1.1.x:  [PvmHostCapability]
+1.1.x:  NumProcMaxForHost = 1
+1.1.x:  MaxProcForCluster = 10
+1.1.x:  NumElabFrameForTask = 100
+1.1.x:  Nodes = 4
+1.1.x:  
+1.1.x:  [Node1]
+1.1.x:  Hostname = foo.buz.lan
+1.1.x:  NumProcMax = 2
+1.1.x:  Enabled = yes
+1.1.x:  
+1.1.x:  [Node2]
+1.1.x:  Hostname = bar.buz.lan
+1.1.x:  NumProcMax = 2
+1.1.x:  Enabled = yes
+1.1.x:  
+1.1.x:  ...
+
+
+Example (Disabling a node):
+
+1.0.x:  ...
+1.0.x:  
+1.0.x:  [PvmHostCapability]
+1.0.x:  NumProcMaxForHost = 1
+1.0.x:  MaxProcForCluster = 10
+1.0.x:  NumElabFrameForTask = 100
+1.0.x:  (Host)
+1.0.x:  Hostname = foo.buz.lan
+1.0.x:  NumProcMax = 2
+1.0.x:  #(Host)
+1.0.x:  #Hostname = bar.buz.lan
+1.0.x:  #NumProcMax = 2
+1.0.x:  
+1.0.x:  ...
+
+1.1.x:  ...
+1.1.x:  
+1.1.x:  [PvmHostCapability]
+1.1.x:  NumProcMaxForHost = 1
+1.1.x:  MaxProcForCluster = 10
+1.1.x:  NumElabFrameForTask = 100
+1.1.x:  Nodes = 4
+1.1.x:  
+1.1.x:  [Node1]
+1.1.x:  Hostname = foo.buz.lan
+1.1.x:  NumProcMax = 2
+1.1.x:  Enabled = yes
+1.1.x:  
+1.1.x:  [Node2]
+1.1.x:  Hostname = bar.buz.lan
+1.1.x:  NumProcMax = 2
+1.1.x:  Enabled = no
+1.1.x:  
+1.1.x:  ...
+
+
+3. File listing
+
+Former AddVideoList and AddAudioList are been split respectively in
+AddVideo,AddVideoList pair and AddAudio and AddAudioList pair.
+AddAudio and AddVideo will just contain the "Destination" and "Codec"
+parameters, while the AddVideoList and AddAudioList contain just the
+file list.
+It is now considered an error to interleave parameters and list.
+
+Example:
+
+1.0.x:  ...
+1.0.x:  
+1.0.x:  [AddVideoList]
+1.0.x:  Destination = /my/dest/file.m1v
+1.0.x:  Codec = mpeg2enc
+1.0.x:  /tmp/file1.m1v
+1.0.x:  /tmp/file2.m1v
+1.0.x:  /tmp/file3.m1v
+1.0.x:  /tmp/file4.m1v
+1.0.x:  /tmp/file5.m1v
+1.0.x:  
+1.0.x:  ...
+
+1.1.x:  ...
+1.1.x:  
+1.1.x:  [AddVideo]
+1.1.x:  Destination = /my/dest/file.m1v
+1.1.x:  Codec = mpeg2enc
+1.1.x:  
+1.1.x:  ...
+1.1.x:  
+1.1.x:  [AddVideoList]
+1.1.x:  /tmp/file1.m1v
+1.1.x:  /tmp/file2.m1v
+1.1.x:  /tmp/file3.m1v
+1.1.x:  /tmp/file4.m1v
+1.1.x:  /tmp/file5.m1v
+1.1.x:  
+1.1.x:  ...
+
+
+4. Miscelanous
+
+The limitation of 8 cluster nodes is arbitrary and will be relaxed or just
+dropped in next transcode versions.
+Same as above for the need to explicitely provide the number of cluster
+nodes and for the need to configure nodes in order.
+
+---------------------------------------------------------------------------
